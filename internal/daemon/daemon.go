@@ -10,31 +10,46 @@ import (
 	"github.com/user/portwatch/internal/portscanner"
 )
 
-// Daemon orchestrates periodic port scanning and change notification.
+// Daemon orchestrates periodic port scanning, diffing, rate-limiting,
+// and notification dispatch.
 type Daemon struct {
-	cfg     *config.Config
-	scanner *portscanner.Scanner
-	store   *portscanner.StateStore
-	notify  notifier.Notifier
+	cfg         *config.Config
+	scanner     *portscanner.Scanner
+	filter      *portscanner.Filter
+	state       *portscanner.StateStore
+	rateLimiter *portscanner.RateLimiter
+	notifier    notifier.Notifier
 }
 
-// New creates a Daemon wired with the provided dependencies.
-func New(cfg *config.Config, scanner *portscanner.Scanner, store *portscanner.StateStore, n notifier.Notifier) *Daemon {
+// New constructs a Daemon from the provided config and notifier.
+func New(cfg *config.Config, n notifier.Notifier) *Daemon {
+	filterOpts := []portscanner.FilterOption{
+		portscanner.WithProtocols(cfg.Protocols),
+		portscanner.WithExcludePorts(cfg.ExcludePorts),
+	}
+	if cfg.ExcludeLoopback {
+		filterOpts = append(filterOpts, portscanner.WithExcludeLoopback())
+	}
+	if cfg.ExcludePrivate {
+		filterOpts = append(filterOpts, portscanner.WithExcludePrivate())
+	}
+
 	return &Daemon{
-		cfg:    cfg,
-		scanner: scanner,
-		store:  store,
-		notify: n,
+		cfg:         cfg,
+		scanner:     portscanner.NewScanner(),
+		filter:      portscanner.NewFilter(filterOpts...),
+		state:       portscanner.NewStateStore(cfg.StateFile),
+		rateLimiter: portscanner.NewRateLimiter(cfg.RateLimitCooldown),
+		notifier:    n,
 	}
 }
 
-// Run starts the scan loop and blocks until ctx is cancelled.
+// Run starts the daemon loop. It blocks until ctx is cancelled.
 func (d *Daemon) Run(ctx context.Context) error {
 	ticker := time.NewTicker(d.cfg.Interval)
 	defer ticker.Stop()
 
-	// Perform an initial scan on startup to establish baseline.
-	if err := d.tick(); err != nil {
+	if err := d.tick(ctx); err != nil {
 		log.Printf("[portwatch] initial scan error: %v", err)
 	}
 
@@ -43,30 +58,32 @@ func (d *Daemon) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if err := d.tick(); err != nil {
+			if err := d.tick(ctx); err != nil {
 				log.Printf("[portwatch] scan error: %v", err)
 			}
+			d.rateLimiter.Purge()
 		}
 	}
 }
 
-func (d *Daemon) tick() error {
-	prev, err := d.store.Load()
+func (d *Daemon) tick(ctx context.Context) error {
+	entries, err := d.scanner.Scan()
 	if err != nil {
 		return err
 	}
 
-	current, err := d.scanner.Scan()
-	if err != nil {
-		return err
-	}
+	filtered := d.filter.Apply(entries)
+	current := portscanner.NewSnapshot(filtered)
 
-	events := portscanner.Diff(prev, current)
-	for _, ev := range events {
-		if err := d.notify.Notify(ev); err != nil {
+	previous, _ := d.state.Load()
+	events := portscanner.Diff(previous, current.ToMap())
+	events = d.rateLimiter.Filter(events)
+
+	for _, e := range events {
+		if err := d.notifier.Notify(ctx, e); err != nil {
 			log.Printf("[portwatch] notify error: %v", err)
 		}
 	}
 
-	return d.store.Save(current)
+	return d.state.Save(current.ToMap())
 }
