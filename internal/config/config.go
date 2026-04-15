@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"time"
 
@@ -10,49 +9,48 @@ import (
 
 // Config holds all runtime configuration for portwatch.
 type Config struct {
-	// Interval between consecutive port scans.
+	// Interval is how often the daemon scans for port changes.
 	Interval time.Duration `toml:"interval"`
-
-	// WebhookURLs is a list of HTTP endpoints to POST change events to.
-	WebhookURLs []string `toml:"webhook_urls"`
-
-	// DesktopNotify enables desktop (OS) notifications.
+	// WebhookURL is the HTTP endpoint to POST change events to.
+	// Leave empty to disable webhook notifications.
+	WebhookURL string `toml:"webhook_url"`
+	// DesktopNotify enables native desktop notifications.
 	DesktopNotify bool `toml:"desktop_notify"`
-
-	// NotifyOnOpen triggers a notification when a new port is detected.
-	NotifyOnOpen bool `toml:"notify_on_open"`
-
-	// NotifyOnClose triggers a notification when a port disappears.
-	NotifyOnClose bool `toml:"notify_on_close"`
+	// ExcludePorts is a list of local ports to ignore during scanning.
+	ExcludePorts []uint16 `toml:"exclude_ports"`
+	// ExcludeLoopback skips loopback-bound ports when true.
+	ExcludeLoopback bool `toml:"exclude_loopback"`
+	// Protocols restricts scanning to the listed protocols.
+	// Accepted values: "tcp", "udp". Empty means both.
+	Protocols []string `toml:"protocols"`
 }
 
-// DefaultConfig returns a Config populated with safe defaults.
-func DefaultConfig() *Config {
-	return &Config{
-		Interval:      5 * time.Second,
-		WebhookURLs:   []string{},
-		DesktopNotify: false,
-		NotifyOnOpen:  true,
-		NotifyOnClose: true,
+// DefaultConfig returns a Config populated with sensible defaults.
+func DefaultConfig() Config {
+	return Config{
+		Interval:        5 * time.Second,
+		DesktopNotify:   false,
+		ExcludeLoopback: false,
+		Protocols:       []string{"tcp", "udp"},
 	}
 }
 
-// Load reads a TOML config file from path and merges it over DefaultConfig.
-// If path is empty the defaults are returned unchanged.
-func Load(path string) (*Config, error) {
+// Load reads a TOML config file from path. If path is empty the
+// default configuration is returned without error.
+func Load(path string) (Config, error) {
 	cfg := DefaultConfig()
 	if path == "" {
 		return cfg, nil
 	}
-
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("config: read file: %w", err)
+		return cfg, err
 	}
-
-	if err := toml.Unmarshal(data, cfg); err != nil {
-		return nil, fmt.Errorf("config: parse toml: %w", err)
+	if err := toml.Unmarshal(data, &cfg); err != nil {
+		return cfg, err
 	}
-
+	if err := Validate(cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
 }
