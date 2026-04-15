@@ -13,86 +13,87 @@ func TestFilter_NoOptions_PassesAll(t *testing.T) {
 	entries := []Entry{
 		makeFilterEntry("tcp", "0.0.0.0", 80),
 		makeFilterEntry("udp", "127.0.0.1", 53),
-		makeFilterEntry("tcp", "192.168.1.5", 443),
+		makeFilterEntry("tcp", "192.168.1.1", 443),
 	}
-	for _, e := range entries {
-		if !f.Apply(e) {
-			t.Errorf("expected entry %v to pass with no options", e)
-		}
+	got := f.Apply(entries)
+	if len(got) != len(entries) {
+		t.Fatalf("expected %d entries, got %d", len(entries), len(got))
 	}
 }
 
 func TestFilter_ExcludePorts(t *testing.T) {
 	f := NewFilter(WithExcludePorts(80, 443))
-
-	if f.Apply(makeFilterEntry("tcp", "0.0.0.0", 80)) {
-		t.Error("port 80 should be excluded")
+	entries := []Entry{
+		makeFilterEntry("tcp", "0.0.0.0", 80),
+		makeFilterEntry("tcp", "0.0.0.0", 443),
+		makeFilterEntry("tcp", "0.0.0.0", 8080),
 	}
-	if f.Apply(makeFilterEntry("tcp", "0.0.0.0", 443)) {
-		t.Error("port 443 should be excluded")
+	got := f.Apply(entries)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
 	}
-	if !f.Apply(makeFilterEntry("tcp", "0.0.0.0", 8080)) {
-		t.Error("port 8080 should pass")
+	if got[0].Port != 8080 {
+		t.Errorf("expected port 8080, got %d", got[0].Port)
 	}
 }
 
 func TestFilter_ExcludeLoopback(t *testing.T) {
 	f := NewFilter(WithExcludeLoopback())
-
-	if f.Apply(makeFilterEntry("tcp", "127.0.0.1", 3306)) {
-		t.Error("loopback address should be excluded")
+	entries := []Entry{
+		makeFilterEntry("tcp", "127.0.0.1", 3306),
+		makeFilterEntry("tcp", "0.0.0.0", 3306),
+		makeFilterEntry("tcp", "::1", 5432),
 	}
-	if !f.Apply(makeFilterEntry("tcp", "0.0.0.0", 3306)) {
-		t.Error("non-loopback address should pass")
+	got := f.Apply(entries)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
+	}
+	if got[0].Address != "0.0.0.0" {
+		t.Errorf("unexpected address %s", got[0].Address)
 	}
 }
 
 func TestFilter_Protocols(t *testing.T) {
 	f := NewFilter(WithProtocols("tcp"))
-
-	if !f.Apply(makeFilterEntry("tcp", "0.0.0.0", 80)) {
-		t.Error("tcp entry should pass")
+	entries := []Entry{
+		makeFilterEntry("tcp", "0.0.0.0", 80),
+		makeFilterEntry("udp", "0.0.0.0", 53),
+		makeFilterEntry("udp", "0.0.0.0", 123),
 	}
-	if f.Apply(makeFilterEntry("udp", "0.0.0.0", 53)) {
-		t.Error("udp entry should be filtered out")
+	got := f.Apply(entries)
+	if len(got) != 1 || got[0].Protocol != "tcp" {
+		t.Fatalf("expected 1 tcp entry, got %d", len(got))
 	}
 }
 
 func TestFilter_ExcludePrivate(t *testing.T) {
 	f := NewFilter(WithExcludePrivate())
-
-	privateAddrs := []string{"10.0.0.1", "172.16.5.10", "192.168.0.100"}
-	for _, addr := range privateAddrs {
-		if f.Apply(makeFilterEntry("tcp", addr, 8080)) {
-			t.Errorf("private address %s should be excluded", addr)
-		}
+	entries := []Entry{
+		makeFilterEntry("tcp", "192.168.0.1", 22),
+		makeFilterEntry("tcp", "10.0.0.5", 22),
+		makeFilterEntry("tcp", "172.16.0.1", 22),
+		makeFilterEntry("tcp", "8.8.8.8", 22),
 	}
-	if !f.Apply(makeFilterEntry("tcp", "8.8.8.8", 8080)) {
-		t.Error("public address should pass")
+	got := f.Apply(entries)
+	if len(got) != 1 || got[0].Address != "8.8.8.8" {
+		t.Fatalf("expected only public address, got %+v", got)
 	}
 }
 
 func TestFilter_CombinedOptions(t *testing.T) {
 	f := NewFilter(
 		WithProtocols("tcp"),
-		WithExcludePorts(22),
 		WithExcludeLoopback(),
+		WithExcludePorts(22),
 	)
-
-	// udp filtered by protocol
-	if f.Apply(makeFilterEntry("udp", "0.0.0.0", 80)) {
-		t.Error("udp should be filtered")
+	entries := []Entry{
+		makeFilterEntry("tcp", "127.0.0.1", 8080), // loopback — excluded
+		makeFilterEntry("udp", "0.0.0.0", 53),     // wrong proto — excluded
+		makeFilterEntry("tcp", "0.0.0.0", 22),     // excluded port
+		makeFilterEntry("tcp", "0.0.0.0", 443),    // passes
 	}
-	// port 22 excluded
-	if f.Apply(makeFilterEntry("tcp", "0.0.0.0", 22)) {
-		t.Error("port 22 should be excluded")
-	}
-	// loopback excluded
-	if f.Apply(makeFilterEntry("tcp", "127.0.0.1", 8080)) {
-		t.Error("loopback should be excluded")
-	}
-	// valid entry
-	if !f.Apply(makeFilterEntry("tcp", "0.0.0.0", 8080)) {
-		t.Error("valid entry should pass all filters")
+	got := f.Apply(entries)
+	if len(got) != 1 || got[0].Port != 443 {
+		t.Fatalf("expected only port 443, got %+v", got)
 	}
 }

@@ -1,11 +1,13 @@
 package portscanner
 
-import "net"
+import (
+	"net"
+)
 
-// FilterOption is a functional option for configuring a Filter.
+// FilterOption configures a Filter.
 type FilterOption func(*Filter)
 
-// Filter decides which port entries are relevant for monitoring.
+// Filter decides which port entries should be included in scan results.
 type Filter struct {
 	excludePorts    map[uint16]bool
 	protocols       map[string]bool
@@ -13,11 +15,11 @@ type Filter struct {
 	excludePrivate  bool
 }
 
-// NewFilter creates a Filter with the provided options applied.
+// NewFilter creates a Filter with the given options applied.
 func NewFilter(opts ...FilterOption) *Filter {
 	f := &Filter{
 		excludePorts: make(map[uint16]bool),
-		protocols:   make(map[string]bool),
+		protocols:    make(map[string]bool),
 	}
 	for _, o := range opts {
 		o(f)
@@ -25,7 +27,7 @@ func NewFilter(opts ...FilterOption) *Filter {
 	return f
 }
 
-// WithExcludePorts excludes specific port numbers from results.
+// WithExcludePorts excludes the given port numbers from results.
 func WithExcludePorts(ports ...uint16) FilterOption {
 	return func(f *Filter) {
 		for _, p := range ports {
@@ -48,13 +50,13 @@ func WithExcludeLoopback() FilterOption {
 	return func(f *Filter) { f.excludeLoopback = true }
 }
 
-// WithExcludePrivate drops entries whose address falls in an RFC-1918 range.
+// WithExcludePrivate drops entries whose address falls in a private IP range.
 func WithExcludePrivate() FilterOption {
 	return func(f *Filter) { f.excludePrivate = true }
 }
 
-// Apply returns true when the entry should be kept.
-func (f *Filter) Apply(e Entry) bool {
+// Allow returns true when entry passes all active filter rules.
+func (f *Filter) Allow(e Entry) bool {
 	if f.excludePorts[e.Port] {
 		return false
 	}
@@ -71,15 +73,34 @@ func (f *Filter) Apply(e Entry) bool {
 	return true
 }
 
-var privateRanges = []net.IPNet{
-	{IP: net.ParseIP("10.0.0.0"), Mask: net.CIDRMask(8, 32)},
-	{IP: net.ParseIP("172.16.0.0"), Mask: net.CIDRMask(12, 32)},
-	{IP: net.ParseIP("192.168.0.0"), Mask: net.CIDRMask(16, 32)},
+// Apply returns only the entries that pass the filter.
+func (f *Filter) Apply(entries []Entry) []Entry {
+	out := make([]Entry, 0, len(entries))
+	for _, e := range entries {
+		if f.Allow(e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+var privateRanges []*net.IPNet
+
+func init() {
+	for _, cidr := range []string{
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"fc00::/7",
+	} {
+		_, block, _ := net.ParseCIDR(cidr)
+		privateRanges = append(privateRanges, block)
+	}
 }
 
 func isPrivate(ip net.IP) bool {
-	for _, r := range privateRanges {
-		if r.Contains(ip) {
+	for _, block := range privateRanges {
+		if block.Contains(ip) {
 			return true
 		}
 	}
