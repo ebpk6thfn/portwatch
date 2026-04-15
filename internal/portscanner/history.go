@@ -1,67 +1,50 @@
 package portscanner
 
-import "sync"
-
-// History maintains a bounded ring buffer of recent Snapshots, allowing
-// callers to inspect recent scan results without persisting them to disk.
+// History is a bounded ring-buffer of Snapshots.
 type History struct {
-	mu       sync.RWMutex
-	buf      []Snapshot
-	cap      int
-	head     int
-	count    int
+	snaps []*Snapshot
+	cap   int
 }
 
-// NewHistory creates a History that retains at most maxSnapshots entries.
-// maxSnapshots must be >= 1; if it is less, it defaults to 1.
-func NewHistory(maxSnapshots int) *History {
-	if maxSnapshots < 1 {
-		maxSnapshots = 1
+// NewHistory creates a History that retains at most maxLen snapshots.
+func NewHistory(maxLen int) *History {
+	if maxLen <= 0 {
+		maxLen = 10
 	}
-	return &History{
-		buf: make([]Snapshot, maxSnapshots),
-		cap: maxSnapshots,
-	}
+	return &History{cap: maxLen}
 }
 
-// Add appends a snapshot to the history, evicting the oldest if the buffer
-// is full.
-func (h *History) Add(s Snapshot) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.buf[h.head] = s
-	h.head = (h.head + 1) % h.cap
-	if h.count < h.cap {
-		h.count++
+// Add appends a new snapshot, evicting the oldest when the buffer is full.
+func (h *History) Add(s *Snapshot) {
+	if len(h.snaps) >= h.cap {
+		h.snaps = h.snaps[1:]
 	}
+	h.snaps = append(h.snaps, s)
 }
 
-// Latest returns the most recently added Snapshot and true, or a zero
-// Snapshot and false if history is empty.
-func (h *History) Latest() (Snapshot, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if h.count == 0 {
-		return Snapshot{}, false
+// Latest returns the most recently added snapshot, or nil if empty.
+func (h *History) Latest() *Snapshot {
+	if len(h.snaps) == 0 {
+		return nil
 	}
-	idx := (h.head - 1 + h.cap) % h.cap
-	return h.buf[idx], true
+	return h.snaps[len(h.snaps)-1]
 }
 
-// All returns snapshots in chronological order (oldest first).
-func (h *History) All() []Snapshot {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	out := make([]Snapshot, h.count)
-	for i := 0; i < h.count; i++ {
-		out[i] = h.buf[(h.head-h.count+i+h.cap)%h.cap]
+// Previous returns the snapshot immediately before the latest, or nil when
+// fewer than two snapshots have been recorded.
+func (h *History) Previous() *Snapshot {
+	if len(h.snaps) < 2 {
+		return nil
 	}
+	return h.snaps[len(h.snaps)-2]
+}
+
+// Len returns the number of snapshots currently held.
+func (h *History) Len() int { return len(h.snaps) }
+
+// All returns a slice of all retained snapshots in chronological order.
+func (h *History) All() []*Snapshot {
+	out := make([]*Snapshot, len(h.snaps))
+	copy(out, h.snaps)
 	return out
-}
-
-// Len returns the number of snapshots currently stored.
-func (h *History) Len() int {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	return h.count
 }
