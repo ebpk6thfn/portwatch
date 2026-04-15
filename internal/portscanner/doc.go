@@ -1,25 +1,17 @@
-// Package portscanner provides primitives for discovering, tracking, and
-// comparing the set of open network ports on the local host.
+// Package portscanner provides utilities for scanning active network ports
+// on a Linux host by reading /proc/net/tcp and /proc/net/tcp6, diffing
+// snapshots to detect changes, and resolving socket inodes to owning processes.
 //
 // # Core types
 //
-//   - [Scanner]      – reads /proc/net/tcp (and tcp6/udp/udp6) to produce
-//     a current snapshot of listening ports.
-//   - [Entry]        – a single port observation (protocol, address, port,
-//     optional process name/PID).
-//   - [Snapshot]     – an immutable, indexed collection of [Entry] values
-//     captured at a specific point in time.
-//   - [Diff]         – compares two snapshots and returns a slice of
-//     [ChangeEvent] values describing what opened or closed.
-//   - [Filter]       – a composable predicate that can exclude entries by
-//     port number, protocol, loopback address, or private subnet.
-//   - [RateLimiter]  – suppresses repeated events for the same port within
-//     a configurable cooldown window.
-//   - [StateStore]   – persists the last-known snapshot to disk so that
-//     portwatch can detect changes across process restarts.
-//   - [History]      – retains a bounded ring of recent snapshots for
-//     in-memory trend analysis.
-//   - [Aggregator]   – collects the [ChangeEvent] slice produced by a single
-//     scan cycle and merges them into a single [AggregatedEvent] for
-//     downstream consumers such as notifiers.
+//   - Scanner: reads /proc/net/tcp[6] and returns a slice of Entry values.
+//   - Entry: represents a single listening port (protocol, address, port, process).
+//   - Snapshot: an immutable, timestamped view of all active ports.
+//   - Diff: compares two Snapshots and returns opened/closed ChangeEvents.
+//   - Filter: applies user-defined rules (exclude ports, loopback, private ranges).
+//   - StateStore: persists the last snapshot to disk for cross-run diffing.
+//   - History: keeps a bounded ring of recent snapshots for trend analysis.
+//   - RateLimiter: suppresses duplicate events within a configurable cooldown.
+//   - Aggregator: batches ChangeEvents from a scan cycle into a single report.
+//   - Resolver: maps socket inodes to PID and process name via /proc/<pid>/fd.
 package portscanner
