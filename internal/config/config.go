@@ -5,51 +5,53 @@ import (
 	"os"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	"github.com/BurntSushi/toml"
 )
 
-// Config holds the full portwatch daemon configuration.
+// Config holds all runtime configuration for portwatch.
 type Config struct {
-	ScanInterval time.Duration `yaml:"scan_interval"`
-	WebhookURL   string        `yaml:"webhook_url"`
-	Desktop      bool          `yaml:"desktop_notifications"`
-	ProcNetPaths []string      `yaml:"proc_net_paths"`
+	// Interval between consecutive port scans.
+	Interval time.Duration `toml:"interval"`
+
+	// WebhookURLs is a list of HTTP endpoints to POST change events to.
+	WebhookURLs []string `toml:"webhook_urls"`
+
+	// DesktopNotify enables desktop (OS) notifications.
+	DesktopNotify bool `toml:"desktop_notify"`
+
+	// NotifyOnOpen triggers a notification when a new port is detected.
+	NotifyOnOpen bool `toml:"notify_on_open"`
+
+	// NotifyOnClose triggers a notification when a port disappears.
+	NotifyOnClose bool `toml:"notify_on_close"`
 }
 
-// DefaultConfig returns a Config populated with sensible defaults.
+// DefaultConfig returns a Config populated with safe defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		ScanInterval: 5 * time.Second,
-		Desktop:      false,
-		ProcNetPaths: []string{
-			"/proc/net/tcp",
-			"/proc/net/tcp6",
-		},
+		Interval:      5 * time.Second,
+		WebhookURLs:   []string{},
+		DesktopNotify: false,
+		NotifyOnOpen:  true,
+		NotifyOnClose: true,
 	}
 }
 
-// Load reads a YAML config file from path and merges it over the defaults.
-// If path is empty the defaults are returned as-is.
+// Load reads a TOML config file from path and merges it over DefaultConfig.
+// If path is empty the defaults are returned unchanged.
 func Load(path string) (*Config, error) {
 	cfg := DefaultConfig()
 	if path == "" {
 		return cfg, nil
 	}
 
-	f, err := os.Open(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("config: open %q: %w", path, err)
-	}
-	defer f.Close()
-
-	dec := yaml.NewDecoder(f)
-	dec.KnownFields(true)
-	if err := dec.Decode(cfg); err != nil {
-		return nil, fmt.Errorf("config: decode %q: %w", path, err)
+		return nil, fmt.Errorf("config: read file: %w", err)
 	}
 
-	if cfg.ScanInterval <= 0 {
-		return nil, fmt.Errorf("config: scan_interval must be positive")
+	if err := toml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("config: parse toml: %w", err)
 	}
 
 	return cfg, nil
