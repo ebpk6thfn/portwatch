@@ -14,52 +14,59 @@ import (
 type Daemon struct {
 	cfg     *config.Config
 	scanner *portscanner.Scanner
+	store   *portscanner.StateStore
 	notify  notifier.Notifier
 }
 
-// New creates a new Daemon with the provided config and notifier.
-func New(cfg *config.Config, n notifier.Notifier) (*Daemon, error) {
-	s, err := portscanner.NewScanner()
-	if err != nil {
-		return nil, err
-	}
+// New creates a Daemon wired with the provided dependencies.
+func New(cfg *config.Config, scanner *portscanner.Scanner, store *portscanner.StateStore, n notifier.Notifier) *Daemon {
 	return &Daemon{
 		cfg:    cfg,
-		scanner: s,
+		scanner: scanner,
+		store:  store,
 		notify: n,
-	}, nil
+	}
 }
 
-// Run starts the daemon loop, scanning at the configured interval until ctx is cancelled.
+// Run starts the scan loop and blocks until ctx is cancelled.
 func (d *Daemon) Run(ctx context.Context) error {
-	prev, err := d.scanner.Scan()
-	if err != nil {
-		return err
-	}
-	log.Printf("portwatch: initial scan found %d open ports", len(prev))
-
 	ticker := time.NewTicker(d.cfg.Interval)
 	defer ticker.Stop()
+
+	// Perform an initial scan on startup to establish baseline.
+	if err := d.tick(); err != nil {
+		log.Printf("[portwatch] initial scan error: %v", err)
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("portwatch: shutting down")
-			return nil
+			return ctx.Err()
 		case <-ticker.C:
-			curr, err := d.scanner.Scan()
-			if err != nil {
-				log.Printf("portwatch: scan error: %v", err)
-				continue
+			if err := d.tick(); err != nil {
+				log.Printf("[portwatch] scan error: %v", err)
 			}
-
-			events := portscanner.Diff(prev, curr)
-			for _, ev := range events {
-				if err := d.notify.Notify(ctx, ev); err != nil {
-					log.Printf("portwatch: notify error: %v", err)
-				}
-			}
-			prev = curr
 		}
 	}
+}
+
+func (d *Daemon) tick() error {
+	prev, err := d.store.Load()
+	if err != nil {
+		return err
+	}
+
+	current, err := d.scanner.Scan()
+	if err != nil {
+		return err
+	}
+
+	events := portscanner.Diff(prev, current)
+	for _, ev := range events {
+		if err := d.notify.Notify(ev); err != nil {
+			log.Printf("[portwatch] notify error: %v", err)
+		}
+	}
+
+	return d.store.Save(current)
 }
