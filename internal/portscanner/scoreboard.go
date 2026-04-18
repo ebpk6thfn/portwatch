@@ -51,6 +51,18 @@ func (s *Scoreboard) Add(key string, delta float64) {
 	e.LastSeen = s.now()
 }
 
+// Get returns the ScoreEntry for key and whether it exists.
+func (s *Scoreboard) Get(key string) (ScoreEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.evict()
+	e, ok := s.entries[key]
+	if !ok {
+		return ScoreEntry{}, false
+	}
+	return *e, true
+}
+
 // Top returns the top n entries sorted by score descending.
 func (s *Scoreboard) Top(n int) []ScoreEntry {
 	s.mu.Lock()
