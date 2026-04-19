@@ -42,3 +42,33 @@ func TestAnomalyDetector_PipelineStyleUsage(t *testing.T) {
 		}
 	}
 }
+
+// TestAnomalyDetector_NoBurstBelowThreshold verifies that activity below the
+// burst threshold does not produce anomalies.
+func TestAnomalyDetector_NoBurstBelowThreshold(t *testing.T) {
+	detector := NewAnomalyDetector(
+		5*time.Second,
+		3,              // burst threshold: need >3 events to trigger
+		15*time.Second,
+		1*time.Millisecond,
+	)
+	sink := NewAnomalySink(100)
+
+	now := time.Now()
+	port := uint16(3333)
+
+	// Only 2 events — below threshold of 3, should not trigger burst.
+	for i := 0; i < 2; i++ {
+		now = now.Add(200 * time.Millisecond)
+		ev := ChangeEvent{
+			Entry: Entry{Port: port, Protocol: "tcp", Addr: "0.0.0.0"},
+			Type:  EventOpened,
+		}
+		sink.ProcessEvents(detector, []ChangeEvent{ev}, now)
+	}
+
+	anomalies := sink.Drain()
+	if len(anomalies) != 0 {
+		t.Errorf("expected no anomalies below burst threshold, got %d", len(anomalies))
+	}
+}
