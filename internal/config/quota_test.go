@@ -44,10 +44,21 @@ func TestBuildQuotaPolicy_NegativeWindow(t *testing.T) {
 }
 
 func TestBuildQuotaPolicy_ZeroMax(t *testing.T) {
-	cfg := QuotaConfig{WindowStr: "1h", MaxHigh: 0, MaxMedium: 10, MaxLow: 10}
-	_, err := BuildQuotaPolicy(cfg)
-	if err == nil {
-		t.Fatal("expected error for zero MaxHigh")
+	tests := []struct {
+		name string
+		cfg  QuotaConfig
+	}{
+		{"zero MaxHigh", QuotaConfig{WindowStr: "1h", MaxHigh: 0, MaxMedium: 10, MaxLow: 10}},
+		{"zero MaxMedium", QuotaConfig{WindowStr: "1h", MaxHigh: 10, MaxMedium: 0, MaxLow: 10}},
+		{"zero MaxLow", QuotaConfig{WindowStr: "1h", MaxHigh: 10, MaxMedium: 10, MaxLow: 0}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := BuildQuotaPolicy(tt.cfg)
+			if err == nil {
+				t.Fatalf("expected error for %s", tt.name)
+			}
+		})
 	}
 }
 
