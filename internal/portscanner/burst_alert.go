@@ -11,7 +11,7 @@ type BurstAlert struct {
 }
 
 // NewBurstAlert creates a BurstAlert for the given protocol.
-Cooldown prevents repeated burst alerts within a short period.
+// Cooldown prevents repeated burst alerts within a short period.
 func NewBurstAlert(threshold int, window, alertCooldown time.Duration, protocol string) *BurstAlert {
 	return &BurstAlert{
 		detector: NewBurstDetector(threshold, window),
@@ -41,4 +41,11 @@ func (ba *BurstAlert) Observe(e ChangeEvent) *ChangeEvent {
 		Label:    "burst-detected",
 	}
 	return &synthetic
+}
+
+// Reset clears the burst detector's event history and resets the cooldown
+// state for this protocol. Useful for testing or after a known noisy period.
+func (ba *BurstAlert) Reset() {
+	ba.detector.Reset()
+	ba.cooldown.Reset("burst:" + ba.protocol)
 }
