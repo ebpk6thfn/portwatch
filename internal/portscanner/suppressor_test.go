@@ -66,6 +66,23 @@ func TestSuppressor_Flush_RemovesExpired(t *testing.T) {
 	}
 }
 
+func TestSuppressor_Flush_RetainsUnexpired(t *testing.T) {
+	fixed := time.Now()
+	s := NewSuppressor(10 * time.Second)
+	s.now = func() time.Time { return fixed }
+
+	e := makeSuppEvent("tcp", "10.0.0.1", ChangeOpened)
+	s.IsSuppressed(dedupKey(e))
+
+	// Advance time but stay within the suppression window.
+	s.now = func() time.Time { return fixed.Add(5 * time.Second) }
+	s.Flush()
+
+	if len(s.suppressed) != 1 {
+		t.Fatalf("expected 1 entry after flush within window, got %d", len(s.suppressed))
+	}
+}
+
 func TestSuppressor_Filter_RemovesSuppressed(t *testing.T) {
 	s := NewSuppressor(30 * time.Second)
 	e1 := makeSuppEvent("tcp", "0.0.0.0", ChangeOpened)
