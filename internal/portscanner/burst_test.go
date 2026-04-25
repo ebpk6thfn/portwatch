@@ -76,3 +76,18 @@ func TestBurstDetector_ThresholdOne(t *testing.T) {
 		t.Error("second event should trigger burst with threshold 1")
 	}
 }
+
+func TestBurstDetector_WindowBoundary(t *testing.T) {
+	base := time.Now()
+	b := NewBurstDetector(2, 5*time.Second)
+
+	b.now = func() time.Time { return base }
+	b.Record()
+	b.Record()
+
+	// exactly at window edge — events should still be within window
+	b.now = func() time.Time { return base.Add(5 * time.Second) }
+	if !b.Record() {
+		t.Error("expected burst when at exact window boundary")
+	}
+}
