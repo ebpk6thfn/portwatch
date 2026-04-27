@@ -64,3 +64,11 @@ func (d *DedupStore) Len() int {
 	}
 	return count
 }
+
+// Delete removes a key from the store immediately, regardless of its expiry.
+// This is useful when an event is explicitly invalidated (e.g. a port closes).
+func (d *DedupStore) Delete(key string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	delete(d.entries, key)
+}
